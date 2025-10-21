@@ -1,0 +1,5 @@
+﻿  RedisClient client = new RedisClient("127.0.0.1", 6379);
+                client.Password = "slac1028";//密码 
+                client.Db =0;  //选择第0个数据库，0-15
+
+ string lastKeyValue = client.Get<string>("k"  + lineID+"."+ deviceID + "." + msgID);
