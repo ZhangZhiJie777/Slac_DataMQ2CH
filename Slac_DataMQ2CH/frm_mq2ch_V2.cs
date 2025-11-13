@@ -17,6 +17,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using SlacDataCollect;
 using ServiceStack.Redis;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar;
 
 
 
@@ -28,6 +29,8 @@ namespace Slac_DataMQ2CH
     /// </summary>
     public partial class frm_mq2ch_V2 : Form
     {
+
+        public static event Action EventReset; // 重置缓存事件
 
         public frm_mq2ch_V2()
         {
@@ -215,45 +218,61 @@ namespace Slac_DataMQ2CH
             }
         }
 
+        // 重置处理缓存
         private void btn_Save2DB_Click(object sender, EventArgs e)
         {
-            if (isPause_save2db)
-            {
-                isPause_save2db = false;
-                btn_Save2DB.Text = "停止数据解析";
-                if (listBox1.Items.Count > 30)
-                {
-                    listBox1.Items.RemoveAt(0);
-                }
-                listBox1.Items.Add("开始数据解析 @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+            #region 注释
+            //if (isPause_save2db)
+            //{
+            //    isPause_save2db = false;
+            //    btn_Save2DB.Text = "停止数据解析";
+            //    if (listBox1.Items.Count > 30)
+            //    {
+            //        listBox1.Items.RemoveAt(0);
+            //    }
+            //    listBox1.Items.Add("开始数据解析 @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
 
-            }
-            else
+            //}
+            //else
+            //{
+            //    isPause_save2db = true;
+            //    btn_Save2DB.Text = "开始数据解析";
+            //    if (listBox1.Items.Count > 30)
+            //    {
+            //        listBox1.Items.RemoveAt(0);
+            //    }
+            //    listBox1.Items.Add("停止数据解析 @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+            //    channel.BasicCancel(consumer.ConsumerTag);
+            //    Thread.Sleep(1000);
+            //    if (ListCount > 0)
+            //    {
+            //        this.Invoke((MethodInvoker)delegate
+            //        {
+            //            saveToCK(RcvTime);
+            //        });
+            //    }
+            //    if (LogListCount > 0)
+            //    {
+            //        this.Invoke((MethodInvoker)delegate
+            //        {
+            //            saveLogToCK(RcvTime);
+            //        });
+            //    }
+            //} 
+            #endregion
+
+            frm_mq2ch_V2.EventReset?.Invoke();
+
+            TextBox_Log1.BeginInvoke(new Action(() =>
             {
-                isPause_save2db = true;
-                btn_Save2DB.Text = "开始数据解析";
-                if (listBox1.Items.Count > 30)
+                if (TextBox_Log1.Lines.Length > 500)
                 {
-                    listBox1.Items.RemoveAt(0);
+                    TextBox_Log1.Clear(); // 清空 TextBox
                 }
-                listBox1.Items.Add("停止数据解析 @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
-                channel.BasicCancel(consumer.ConsumerTag);
-                Thread.Sleep(1000);
-                if (ListCount > 0)
-                {
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        saveToCK(RcvTime);
-                    });
-                }
-                if (LogListCount > 0)
-                {
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        saveLogToCK(RcvTime);
-                    });
-                }
-            }
+                TextBox_Log1.AppendText($"重置处理缓存成功 @ {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}" + Environment.NewLine);
+                TextBox_Log1.ScrollToCaret(); // 滚动到最新一行
+            }));
+
         }
 
         private void notifyIcon1_DoubleClick(object sender, EventArgs e)
@@ -270,30 +289,33 @@ namespace Slac_DataMQ2CH
 
         private void btn_closeme_Click(object sender, EventArgs e)
         {
-            isPause_save2db = true;
-            btn_Save2DB.Text = "开始数据解析";
-            if (listBox1.Items.Count > 30)
-            {
-                listBox1.Items.RemoveAt(0);
-            }
-            listBox1.Items.Add("暂停数据解析 @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
-            Thread.Sleep(500);
-            if (ListCount >= 0)
-            {
-                this.Invoke((MethodInvoker)delegate
-                {
-                    saveToCK(RcvTime);
-                });
-            }
-            if (LogListCount > 0)
-            {
-                this.Invoke((MethodInvoker)delegate
-                {
-                    saveLogToCK(RcvTime);
-                });
-            }
-            channel.Close();
-            connection.Close();
+            #region 注释
+            //isPause_save2db = true;
+            //btn_Save2DB.Text = "开始数据解析";
+            //if (listBox1.Items.Count > 30)
+            //{
+            //    listBox1.Items.RemoveAt(0);
+            //}
+            //listBox1.Items.Add("暂停数据解析 @ " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+            //Thread.Sleep(500);
+            //if (ListCount >= 0)
+            //{
+            //    this.Invoke((MethodInvoker)delegate
+            //    {
+            //        saveToCK(RcvTime);
+            //    });
+            //}
+            //if (LogListCount > 0)
+            //{
+            //    this.Invoke((MethodInvoker)delegate
+            //    {
+            //        saveLogToCK(RcvTime);
+            //    });
+            //} 
+            //channel.Close();
+            //connection.Close();
+            #endregion
+
             notifyIcon1.Visible = false;
             System.Environment.Exit(0);
         }

@@ -54,38 +54,40 @@
             this.listBox1.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.listBox1.ForeColor = System.Drawing.Color.Lime;
             this.listBox1.FormattingEnabled = true;
+            this.listBox1.ItemHeight = 17;
             this.listBox1.Location = new System.Drawing.Point(3, 50);
             this.listBox1.Name = "listBox1";
-            this.listBox1.Size = new System.Drawing.Size(951, 26);
+            this.listBox1.Size = new System.Drawing.Size(951, 17);
             this.listBox1.TabIndex = 7;
             this.listBox1.Visible = false;
             // 
             // btn_Save2DB
             // 
+            this.btn_Save2DB.Font = new System.Drawing.Font("宋体", 13.8F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.btn_Save2DB.Location = new System.Drawing.Point(12, 12);
             this.btn_Save2DB.Name = "btn_Save2DB";
             this.btn_Save2DB.Size = new System.Drawing.Size(161, 37);
             this.btn_Save2DB.TabIndex = 6;
-            this.btn_Save2DB.Text = "开始数据解析";
+            this.btn_Save2DB.Text = "重置处理";
             this.btn_Save2DB.UseVisualStyleBackColor = true;
-            this.btn_Save2DB.Visible = false;
             this.btn_Save2DB.Click += new System.EventHandler(this.btn_Save2DB_Click);
             // 
             // menu_icon
             // 
             this.menu_icon.Font = new System.Drawing.Font("微软雅黑", 10.5F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.menu_icon.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.menu_icon.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.btn_show,
             this.btn_closeme});
             this.menu_icon.Name = "menu_icon";
-            this.menu_icon.Size = new System.Drawing.Size(166, 56);
+            this.menu_icon.Size = new System.Drawing.Size(188, 60);
             // 
             // btn_show
             // 
             this.btn_show.Image = ((System.Drawing.Image)(resources.GetObject("btn_show.Image")));
             this.btn_show.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
             this.btn_show.Name = "btn_show";
-            this.btn_show.Size = new System.Drawing.Size(165, 26);
+            this.btn_show.Size = new System.Drawing.Size(187, 28);
             this.btn_show.Text = "显示主窗口";
             this.btn_show.Click += new System.EventHandler(this.btn_show_Click);
             // 
@@ -94,7 +96,7 @@
             this.btn_closeme.Image = ((System.Drawing.Image)(resources.GetObject("btn_closeme.Image")));
             this.btn_closeme.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
             this.btn_closeme.Name = "btn_closeme";
-            this.btn_closeme.Size = new System.Drawing.Size(165, 26);
+            this.btn_closeme.Size = new System.Drawing.Size(187, 28);
             this.btn_closeme.Text = "退出";
             this.btn_closeme.Click += new System.EventHandler(this.btn_closeme_Click);
             // 
@@ -113,7 +115,7 @@
             this.checkBox1.Enabled = false;
             this.checkBox1.Location = new System.Drawing.Point(179, 12);
             this.checkBox1.Name = "checkBox1";
-            this.checkBox1.Size = new System.Drawing.Size(152, 18);
+            this.checkBox1.Size = new System.Drawing.Size(183, 21);
             this.checkBox1.TabIndex = 8;
             this.checkBox1.Text = "发送到远端消息队列";
             this.checkBox1.UseVisualStyleBackColor = true;
@@ -125,7 +127,7 @@
             this.label1.Font = new System.Drawing.Font("宋体", 14.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.label1.Location = new System.Drawing.Point(-1, 334);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(149, 19);
+            this.label1.Size = new System.Drawing.Size(185, 24);
             this.label1.TabIndex = 9;
             this.label1.Text = "数据消费处理：";
             // 
@@ -137,7 +139,7 @@
             this.CheckBox_IsShowLog.Font = new System.Drawing.Font("宋体", 14.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.CheckBox_IsShowLog.Location = new System.Drawing.Point(806, 26);
             this.CheckBox_IsShowLog.Name = "CheckBox_IsShowLog";
-            this.CheckBox_IsShowLog.Size = new System.Drawing.Size(148, 23);
+            this.CheckBox_IsShowLog.Size = new System.Drawing.Size(182, 28);
             this.CheckBox_IsShowLog.TabIndex = 10;
             this.CheckBox_IsShowLog.Text = "是否显示日志";
             this.CheckBox_IsShowLog.UseVisualStyleBackColor = true;
@@ -147,7 +149,7 @@
             this.checkBox3.AutoSize = true;
             this.checkBox3.Location = new System.Drawing.Point(633, 12);
             this.checkBox3.Name = "checkBox3";
-            this.checkBox3.Size = new System.Drawing.Size(110, 18);
+            this.checkBox3.Size = new System.Drawing.Size(136, 21);
             this.checkBox3.TabIndex = 11;
             this.checkBox3.Text = "保存packetID";
             this.checkBox3.UseVisualStyleBackColor = true;
@@ -158,7 +160,7 @@
             this.checkBox4.AutoSize = true;
             this.checkBox4.Location = new System.Drawing.Point(367, 12);
             this.checkBox4.Name = "checkBox4";
-            this.checkBox4.Size = new System.Drawing.Size(131, 18);
+            this.checkBox4.Size = new System.Drawing.Size(159, 21);
             this.checkBox4.TabIndex = 12;
             this.checkBox4.Text = "保存bin（调试）";
             this.checkBox4.UseVisualStyleBackColor = true;
@@ -171,7 +173,7 @@
             this.checkBox5.CheckState = System.Windows.Forms.CheckState.Checked;
             this.checkBox5.Location = new System.Drawing.Point(517, 12);
             this.checkBox5.Name = "checkBox5";
-            this.checkBox5.Size = new System.Drawing.Size(110, 18);
+            this.checkBox5.Size = new System.Drawing.Size(132, 21);
             this.checkBox5.TabIndex = 13;
             this.checkBox5.Text = "显示异常日志";
             this.checkBox5.UseVisualStyleBackColor = true;
@@ -203,13 +205,13 @@
             this.label2.Font = new System.Drawing.Font("宋体", 14.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.label2.Location = new System.Drawing.Point(-1, 80);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(149, 19);
+            this.label2.Size = new System.Drawing.Size(185, 24);
             this.label2.TabIndex = 16;
             this.label2.Text = "数据处理日志：";
             // 
             // frm_mq2ch_V2
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 13F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.SystemColors.GradientActiveCaption;
             this.ClientSize = new System.Drawing.Size(951, 575);

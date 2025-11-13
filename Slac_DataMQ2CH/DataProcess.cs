@@ -20,10 +20,13 @@
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using ServiceStack.Messaging;
+using Slac_DataMQ2File;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Data.Entity.Core.Common.CommandTrees.ExpressionBuilder;
+using System.Diagnostics.Eventing.Reader;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -58,29 +61,62 @@ namespace Slac_DataMQ2CH
 
         private int _lastdataNum;  // 上一个数据序号
 
-        private int _lastLoopSign; // 循环标志     
-
-        private int _dataPacketNum; // 数据包数量计数（每100个包上传一次）
-
-        private int _dataPacketCount; // 数据包计数（累计多少个数据）
-
         private byte[] timeByte = new byte[4]; // 时间字节
 
         #endregion
 
+        #region 参数
+
+        private int _lastLoopSign11; // 脉冲通道1循环标志
+        private int _lastLoopSign12; // 脉冲通道2循环标志
+
+        private int _lastLoopSign21; // 采样通道1循环标志     
+        private int _lastLoopSign22; // 采样通道2循环标志     
+        private int _lastLoopSign23; // 采样通道3循环标志     
+        private int _lastLoopSign24; // 采样通道4循环标志     
+
 
         // 当前接收缓存区，用于存放未处理的数据包
-        private List<DataPacket> _buffer1 = new List<DataPacket>();
+        private List<DataPacket> _buffer11 = new List<DataPacket>(); // 脉冲通道1缓存区
+        private List<DataPacket> _buffer12 = new List<DataPacket>(); // 脉冲通道2缓存区
 
-        private List<DataPacket> _buffer2 = new List<DataPacket>();
+        private List<DataPacket> _buffer21 = new List<DataPacket>(); // 采样通道1缓存区
+        private List<DataPacket> _buffer22 = new List<DataPacket>(); // 采样通道2缓存区
+        private List<DataPacket> _buffer23 = new List<DataPacket>(); // 采样通道3缓存区
+        private List<DataPacket> _buffer24 = new List<DataPacket>(); // 采样通道4缓存区
 
         /// <summary>
         /// 当前是否强制立即处理标志位
         /// </summary>
-        public bool ForceProcess { get; set; } = false;
+        public bool ForceProcess11 { get; set; } = false; // 脉冲通道1强制处理标志位
+        public bool ForceProcess12 { get; set; } = false; // 脉冲通道2强制处理标志位
+
+        public bool ForceProcess21 { get; set; } = false; // 采样通道1强制处理标志位
+        public bool ForceProcess22 { get; set; } = false; // 采样通道2强制处理标志位
+        public bool ForceProcess23 { get; set; } = false; // 采样通道3强制处理标志位
+        public bool ForceProcess24 { get; set; } = false; // 采样通道4强制处理标志位
+
+        #endregion
+
+        private bool ReceiveState = false; // 接收状态
 
         public DataProcess()
         {
+            frm_mq2ch_V2.EventReset += () =>
+            {
+                if (!ReceiveState)
+                {
+                    _buffer11.Clear();
+                    _buffer12.Clear();
+
+                    _buffer21.Clear();
+                    _buffer22.Clear();
+                    _buffer23.Clear();
+                    _buffer24.Clear();
+                }
+
+            };
+
             #region 初始化RabbitMQ连接
 
             connection = factory.CreateConnection();
@@ -113,6 +149,7 @@ namespace Slac_DataMQ2CH
                 consumer.Received += (model, ea) =>
                 {
                     StringBuilder errorLog = new StringBuilder();//日志记录
+                    ReceiveState = true;
                     try
                     {
                         var MQmsg = ea.Body;
@@ -148,6 +185,7 @@ namespace Slac_DataMQ2CH
                             // 基本长度校验（至少要包含 2字节帧头 + 1字节命令 + 2字节帧尾 = 5字节）
                             if (buffer_all.Length < 5)
                             {
+                                channel.BasicAck(ea.DeliveryTag, false);
                                 //Console.WriteLine($"来自 {ipstr} 的数据长度不足，无法解析。");
                                 return;
                             }
@@ -159,6 +197,7 @@ namespace Slac_DataMQ2CH
 
                             if (!headMatch || !tailMatch)
                             {
+                                channel.BasicAck(ea.DeliveryTag, false);
                                 // Console.WriteLine($"来自 {ipstr} 的数据帧不合法（头或尾不匹配）");
                                 return;
                             }
@@ -182,7 +221,7 @@ namespace Slac_DataMQ2CH
                                     break;
 
                                 case 0x02:
-                                    HandleCommand02(buffer_all, timeReceiveBytes);
+                                    HandleCommand02(buffer_all.ToArray(), timeReceiveBytes.ToArray());
                                     break;
 
                                 case 0x03:
@@ -195,20 +234,22 @@ namespace Slac_DataMQ2CH
                             }
 
                             channel.BasicAck(ea.DeliveryTag, false); // 确认消息已处理，删除队列中的消息
+
+                            ReceiveState = false;
                         }
                         catch (Exception ex)
                         {
-
+                            LogConfig.Intence.WriteLog("ErrLog", "DataLog", $"异常：{ex.ToString()}\r\n {ex.StackTrace}");
                             throw;
                         }
 
                     }
                     catch (Exception ex)
                     {
-
+                        ReceiveState = false;
+                        channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false); // 确认消息已处理，删除队列中的消息     
                         System.IO.File.AppendAllText("output\\" + DateTime.Now.ToString("yyyyMMdd_") + ".log", $"====RabbitMQ received event Error Begin======{Environment.NewLine}{errorLog.ToString()}{Environment.NewLine}====RabbitMQ received event Error End======{Environment.NewLine}");
                         errorLog.Clear();
-                        channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false); // 确认消息已处理，删除队列中的消息     
 
 
 
@@ -232,8 +273,9 @@ namespace Slac_DataMQ2CH
         /// </summary>
         private void HandleCommand00(byte[] data)
         {
-            //Console.WriteLine($"执行命令 00：设备 {remote} 回复心跳包");
-            // TODO: 在这里添加具体业务逻辑
+            string hexString = BitConverter.ToString(data).Replace("-", " ");
+
+            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"心跳包：{hexString}\r\n");
         }
 
         /// <summary>
@@ -241,6 +283,10 @@ namespace Slac_DataMQ2CH
         /// </summary>
         private void HandleCommand01(byte[] data)
         {
+            string hexString = BitConverter.ToString(data).Replace("-", " ");
+
+            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"01数据配置包：{hexString}\r\n");
+
             // 警报信号，需要启用新的循环
             if (data[5] == 0x0F)
             {
@@ -263,115 +309,249 @@ namespace Slac_DataMQ2CH
         private void HandleCommand02(byte[] data, byte[] timeReceiveBytes)
         {
 
-            // 第四、五个字节为数据区长度
-            int dataActualLength = GetBigEndianHex(data, 3, 2);
-
-            // 第六个字节为通道序号 
-            int channelNum = GetBigEndianHex(data, 5, 1);
-
-            // 第七个字节为数据位数
-            int dataBit = GetBigEndianHex(data, 6, 1);
-
-            // 第八个字节为循环标记
-            int loopSign = GetBigEndianHex(data, 7, 1);
-
-            // 第九到第十二个字节为数据起始序号
-            int dataNum = GetBigEndianHex(data, 8, 4);
-
-            // 第十三、十四字节为偏移数据
-            int offset = GetBigEndianHex(data, 12, 2);
-
-
-            string fileName = $"通道{channelNum}_位数{dataBit}_偏移{offset}_循环{loopSign}";
-
-            // 第十五个字节开始为数据区，每两个字节代表一个数据
-            int[] dataArr = new int[dataActualLength / 2];
-
-            for (int i = 0; i < dataActualLength; i += 2)
+            try
             {
-                int value = GetBigEndianHex(data, 14 + i, 2);
-                dataArr[i / 2] = value;
+                // 第四、五个字节为数据区长度
+                int dataActualLength = GetBigEndianHex(data, 3, 2) - 9;
+
+                // 第六个字节为通道序号 
+                int channelNum = GetBigEndianHex(data, 5, 1);
+
+                // 第七个字节为数据位数
+                int dataBit = GetBigEndianHex(data, 6, 1);
+
+
+                // 第八个字节为循环标记
+                int loopSign = GetBigEndianHex(data, 7, 1);
+
+                //if (_buffer1.Count == 139)
+                //{
+
+                //}
+
+
+                // 第九到第十二个字节为数据起始序号
+                int dataNum = GetBigEndianHex(data, 8, 4);
+
+                // 第十三、十四字节为偏移数据
+                int offset = GetBigEndianHex(data, 12, 2);
+
+
+                string fileName = $"通道{channelNum}_位数{dataBit}_偏移{offset}_循环{loopSign}";
+
+                // 第十五个字节开始为数据区，每两个字节代表一个数据
+                #region 原代码注释
+                //int[] dataArr = new int[dataActualLength / 4];
+
+                //for (int i = 0; i < dataActualLength; i += 4)
+                //{
+                //    int value = GetBigEndianHex(data, 14 + i, 4);
+                //    dataArr[i / 4] = value;
+                //}
+                #endregion
+
+                int[] dataArr = new int[dataActualLength / 2];
+
+                for (int i = 0; i < dataActualLength; i += 2)
+                {
+                    int value = GetBigEndianHex(data, 14 + i, 2);
+                    dataArr[i / 2] = value;
+                }
+
+                int len = dataArr.Length;
+                byte[] bytes = new byte[len * 4]; // 每个int 4字节
+
+                Buffer.BlockCopy(dataArr, 0, bytes, 0, bytes.Length);
+
+                DataPacket packet = new DataPacket();
+                packet.PacketIndex = dataNum;
+                packet.DataCount = dataActualLength / 2;  // 数据个数（接收到的是每四个字节表示一个数据）
+                packet.Data = bytes.ToArray();            // 数据（每四个字节，表示一个int数据）
+                packet.Time = timeReceiveBytes.ToArray(); // 时间戳            
+                packet.LoopSign = loopSign;               // 循环标志
+                packet.ChannelNum = channelNum;           // 通道序号
+
+                if (channelNum == 0) // 通道1
+                {
+                    bool discard = false;
+
+                    if (loopSign != _lastLoopSign11)
+                    {
+                        // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
+                        _lastLoopSign11 = loopSign;
+
+                        ForceProcess11 = true; // 设置强制处理标志位
+
+                        // 数据溢出，超出界限数据，丢掉
+                        if (dataNum > 2000000)
+                        {
+                            discard = true;
+                        }
+                    }
+
+                    //  如果设置了强制处理标志位，立即处理所有缓存包
+                    if (ForceProcess11)
+                    {
+                        LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"主动反馈脉冲数据通道0：循环{_lastLoopSign11}：检测到 ForceProcess = true，立即处理所有缓存数据包。\r\n");
+                        ProcessAllPackets(_buffer11, "主动反馈脉冲数据通道0", fileName, _lastLoopSign11);
+                        _buffer11.Clear();
+                        ForceProcess11 = false; // 处理完成后自动复位                
+                    }
+
+                    if (!discard)
+                    {
+                        _buffer11.Add(packet); // 将数据包添加到缓冲区
+                    }
+
+                    if (_buffer11.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer11
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer11
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        if (hasDuplicate)
+                        {
+                            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"主动反馈脉冲数据通道0：存在重复数据包 循环标记：{loopSign}\r\n");
+
+                            var seen = new HashSet<int>();
+                            var filtered = new List<DataPacket>();
+
+                            foreach (var item in _buffer11)
+                            {
+                                if (seen.Add(item.PacketIndex))
+                                {
+                                    filtered.Add(item);
+                                }
+                            }
+
+                            _buffer11 = filtered;
+                        }
+                    }
+
+                    //  正常情况：累积200个包时触发处理
+                    if (_buffer11.Count >= 200)
+                    {
+                        //_buffer1.Select
+
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer11
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer11
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        _buffer11 = ProcessPackets(_buffer11, "主动反馈脉冲数据通道0", fileName, loopSign);
+
+                        EventReceiveCount?.Invoke($"主动反馈脉冲数据通道0 循环{loopSign}", 100); // 触发事件，刷新界面日志
+                    }
+                }
+                else if (channelNum == 1) // 通道2
+                {
+                    bool discard = false;
+
+                    if (loopSign != _lastLoopSign12)
+                    {
+                        // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
+                        _lastLoopSign12 = loopSign;
+
+                        ForceProcess12 = true; // 设置强制处理标志位
+
+                        // 数据溢出，超出界限数据，丢掉
+                        if (dataNum > 2000000)
+                        {
+                            discard = true;
+                        }
+                    }
+
+                    //  如果设置了强制处理标志位，立即处理所有缓存包
+                    if (ForceProcess12)
+                    {
+                        LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"主动反馈脉冲数据通道1：循环{_lastLoopSign11}：检测到 ForceProcess = true，立即处理所有缓存数据包。\r\n");
+                        ProcessAllPackets(_buffer12, "主动反馈脉冲数据通道1", fileName, _lastLoopSign12);
+                        _buffer12.Clear();
+                        ForceProcess12 = false; // 处理完成后自动复位                
+                    }
+
+                    if (!discard)
+                    {
+                        _buffer12.Add(packet); // 将数据包添加到缓冲区
+                    }
+
+                    if (_buffer12.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer12
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer12
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        if (hasDuplicate)
+                        {
+                            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"主动反馈脉冲数据通道1：存在重复数据包 循环标记：{loopSign}\r\n");
+
+                            var seen = new HashSet<int>();
+                            var filtered = new List<DataPacket>();
+
+                            foreach (var item in _buffer12)
+                            {
+                                if (seen.Add(item.PacketIndex))
+                                {
+                                    filtered.Add(item);
+                                }
+                            }
+
+                            _buffer12 = filtered;
+                        }
+                    }
+
+                    //  正常情况：累积200个包时触发处理
+                    if (_buffer12.Count >= 200)
+                    {
+                        //_buffer1.Select
+
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer12
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer12
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        _buffer12 = ProcessPackets(_buffer12, "主动反馈脉冲数据通道1", fileName, loopSign);
+
+                        EventReceiveCount?.Invoke($"主动反馈脉冲数据通道1 循环{loopSign}", 100); // 触发事件，刷新界面日志
+                    }
+                }
             }
-
-            int len = dataArr.Length;
-            byte[] bytes = new byte[len * 4]; // 每个int 4字节
-
-            Buffer.BlockCopy(dataArr, 0, bytes, 0, bytes.Length);
-
-
-            if (loopSign != _lastLoopSign)
+            catch (Exception ex)
             {
-                // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
-                _dataPacketNum = 0;
-                _dataPacketCount = 0;
-                _lastLoopSign = loopSign;
-
-                ForceProcess = true; // 设置强制处理标志位
+                LogConfig.Intence.WriteLog("ErrLog", "DataLog", $"主动反馈脉冲数据：处理数据包时发生异常：{ex.Message}\r\n {ex.StackTrace}");
+                //throw;
             }
-
-            DataPacket packet = new DataPacket();
-            packet.PacketIndex = dataNum;
-            packet.DataCount = dataActualLength / 2; // 数据个数（接收到的是每两个字节表示一个数据）
-            packet.Data = bytes;                     // 数据（每四个字节，表示一个int数据）
-            packet.Time = timeReceiveBytes;          // 时间戳            
-
-            //  如果设置了强制处理标志位，立即处理所有缓存包
-            if (ForceProcess)
-            {
-                Console.WriteLine("检测到 ForceProcess = true，立即处理所有缓存数据包。");
-                ProcessAllPackets(_buffer1, "主动反馈脉冲数据", fileName);
-                _buffer1.Clear();
-                ForceProcess = false; // 处理完成后自动复位
-                //return;
-            }
-
-            _buffer1.Add(packet); // 将数据包添加到缓冲区
-
-
-            //  正常情况：累积200个包时触发处理
-            if (_buffer1.Count >= 200)
-            {
-                _buffer1 = ProcessPackets(_buffer1, "主动反馈脉冲数据", fileName);
-            }
-
-            #region 注释
-            //_dataPacketNum++;   // 数据包上传计数加1 （满足200个数据包，上传前100个数据包）
-            //_dataPacketCount++; // 数据包总计数加1
-
-            //// 数据包计数小于100，继续累加数据包
-            //if (_dataPacketNum < 100)
-            //{
-            //    // 数据包计数小于100，继续累加数据包到第一个缓冲区
-            //    int index = (dataNum % 70000) * 4;
-
-            //    Buffer.BlockCopy(bytes, 0, firstData, index, bytes.Length);
-
-            //}
-            //else if (_dataPacketNum == 100)
-            //{
-            //    int index = (dataNum % 70000) * 4;
-
-            //    Buffer.BlockCopy(bytes, 0, firstData, index, bytes.Length);
-
-            //    firstDataNum = GetDataNumBytes(_dataPacketCount); // 获取数据序号byte数组
-
-            //}
-            //else if (_dataPacketNum > 100 && _dataPacketNum < 200)
-            //{
-            //    // 数据包计数大于100，小于200，继续累加数据包到第二个缓冲区
-            //    int index = (dataNum % 70000) * 4;
-
-            //    Buffer.BlockCopy(bytes, 0, secondData, index, bytes.Length);
-
-            //}
-            //else if (_dataPacketNum == 200)
-            //{
-            //    // 数据包计数等于200，处理数据(处理第一层缓冲数据firstData)
-            //    _dataPacketNum = 100;
-
-            //} 
-            #endregion
-
+                       
         }
 
         /// <summary>
@@ -379,77 +559,391 @@ namespace Slac_DataMQ2CH
         /// </summary>
         private void HandleCommand03(byte[] data, byte[] timeReceiveBytes)
         {
-            // 第四、五个字节为数据区长度
-            int dataActualLength = GetBigEndianHex(data, 3, 2);
-
-            // 第六个字节为通道序号 
-            int channelNum = GetBigEndianHex(data, 5, 1);
-
-            // 第七、八字节为采样率
-            int dataBit = GetBigEndianHex(data, 6, 2);
-
-            // 第九个字节为循环标记
-            int loopSign = GetBigEndianHex(data, 8, 1);
-
-            // 第十到第十三个字节为数据起始序号
-            int dataNum = GetBigEndianHex(data, 9, 4);
-
-            // 第十四、十五字节为偏移数据
-            int offset = GetBigEndianHex(data, 13, 2);
-
-
-            string fileName = $"通道{channelNum}_采样率{dataBit}_偏移{offset}_循环{loopSign}";
-
-            // 第十六个字节开始为数据区，每两个字节代表一个数据
-            int[] dataArr = new int[dataActualLength / 2];
-
-            for (int i = 0; i < dataActualLength; i += 2)
+            try
             {
-                int value = GetBigEndianHex(data, 15 + i, 2);
-                dataArr[i] = value;
+                // 第四、五个字节为数据区长度
+                int dataActualLength = GetBigEndianHex(data, 3, 2) - 10;
+
+                // 第六个字节为通道序号 
+                int channelNum = GetBigEndianHex(data, 5, 1);
+
+                // 第七、八字节为采样率
+                int dataBit = GetBigEndianHex(data, 6, 2);
+
+                // 第九个字节为循环标记
+                int loopSign = GetBigEndianHex(data, 8, 1);
+
+                // 第十到第十三个字节为数据起始序号
+                int dataNum = GetBigEndianHex(data, 9, 4);
+
+                // 第十四、十五字节为偏移数据
+                int offset = GetBigEndianHex(data, 13, 2);
+
+                string fileName = $"通道{channelNum}_采样率{dataBit}_偏移{offset}_循环{loopSign}";
+
+                // 第十六个字节开始为数据区，每两个字节代表一个数据
+                int[] dataArr = new int[dataActualLength / 2];
+
+                for (int i = 0; i < dataActualLength; i += 2)
+                {
+                    int value = GetBigEndianHex(data, 15 + i, 2);
+                    dataArr[i / 2] = value;
+                }
+
+                int len = dataArr.Length;
+                byte[] bytes = new byte[len * 4]; // 每个int 4字节
+
+                Buffer.BlockCopy(dataArr, 0, bytes, 0, bytes.Length);
+
+                DataPacket packet = new DataPacket();
+                packet.PacketIndex = dataNum;
+                packet.DataCount = dataActualLength / 2;  // 数据个数（接收到的是每两个字节表示一个数据）
+                packet.Data = bytes.ToArray();            // 数据（每四个字节，表示一个int数据）
+                packet.Time = timeReceiveBytes.ToArray(); // 时间戳
+                packet.LoopSign = loopSign;               // 循环标志
+                packet.ChannelNum = channelNum;           // 通道序号
+
+                if (channelNum == 0)
+                {
+                    bool discard = false;
+
+                    if (loopSign != _lastLoopSign21)
+                    {
+                        // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
+                        _lastLoopSign21 = loopSign;
+
+                        ForceProcess21 = true; // 设置强制处理标志位
+
+                        // 数据溢出，超出界限数据，丢掉
+                        if (dataNum > 2000000)
+                        {
+                            discard = true;
+                        }
+                    }
+
+                    //  如果设置了强制处理标志位，立即处理所有缓存包
+                    if (ForceProcess21)
+                    {
+                        LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"主动反馈采样数据通道0：循环{_lastLoopSign11}：检测到 ForceProcess = true，立即处理所有缓存数据包。\r\n");
+                        ProcessAllPackets(_buffer21, "主动反馈采样数据通道0", fileName, _lastLoopSign21);
+                        _buffer21.Clear();
+                        ForceProcess21 = false; // 处理完成后自动复位                
+                    }
+
+                    if (!discard)
+                    {
+                        _buffer21.Add(packet); // 将数据包添加到缓冲区
+                    }
+
+                    if (_buffer21.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer21
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer21
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        if (hasDuplicate)
+                        {
+                            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"主动反馈采样数据通道0：存在重复数据包 循环标记：{loopSign}\r\n");
+                            var seen = new HashSet<int>();
+                            var filtered = new List<DataPacket>();
+
+                            foreach (var item in _buffer21)
+                            {
+                                if (seen.Add(item.PacketIndex))
+                                {
+                                    filtered.Add(item);
+                                }
+                            }
+
+                            _buffer21 = filtered;
+                        }
+                    }
+
+                    //  正常情况：累积200个包时触发处理
+                    if (_buffer21.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer21
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer21
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        _buffer21 = ProcessPackets(_buffer21, "主动反馈采样数据通道0", fileName, loopSign);
+                        EventReceiveCount?.Invoke($"主动反馈采样数据通道0 循环{loopSign}", 100); // 触发事件，刷新界面日志
+                    }
+                }
+                else if (channelNum == 1)
+                {
+                    bool discard = false;
+
+                    if (loopSign != _lastLoopSign22)
+                    {
+                        // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
+                        _lastLoopSign22 = loopSign;
+
+                        ForceProcess22 = true; // 设置强制处理标志位
+
+                        // 数据溢出，超出界限数据，丢掉
+                        if (dataNum > 2000000)
+                        {
+                            discard = true;
+                        }
+                    }
+
+                    //  如果设置了强制处理标志位，立即处理所有缓存包
+                    if (ForceProcess22)
+                    {
+                        LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"主动反馈采样数据通道1：循环{_lastLoopSign11}：检测到 ForceProcess = true，立即处理所有缓存数据包。\r\n");
+                        ProcessAllPackets(_buffer22, "主动反馈采样数据通道1", fileName, _lastLoopSign22);
+                        _buffer22.Clear();
+                        ForceProcess22 = false; // 处理完成后自动复位                
+                    }
+
+                    if (!discard)
+                    {
+                        _buffer22.Add(packet); // 将数据包添加到缓冲区
+                    }
+
+                    if (_buffer22.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer22
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer22
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        if (hasDuplicate)
+                        {
+                            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"主动反馈采样数据通道1：存在重复数据包 循环标记：{loopSign}\r\n");
+                            var seen = new HashSet<int>();
+                            var filtered = new List<DataPacket>();
+
+                            foreach (var item in _buffer22)
+                            {
+                                if (seen.Add(item.PacketIndex))
+                                {
+                                    filtered.Add(item);
+                                }
+                            }
+
+                            _buffer22 = filtered;
+                        }
+                    }
+
+                    //  正常情况：累积200个包时触发处理
+                    if (_buffer22.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer22
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer22
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        _buffer22 = ProcessPackets(_buffer22, "主动反馈采样数据通道1", fileName, loopSign);
+                        EventReceiveCount?.Invoke($"主动反馈采样数据通道1 循环{loopSign}", 100); // 触发事件，刷新界面日志
+                    }
+                }
+                else if (channelNum == 2)
+                {
+                    bool discard = false;
+
+                    if (loopSign != _lastLoopSign23)
+                    {
+                        // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
+                        _lastLoopSign23 = loopSign;
+
+                        ForceProcess23 = true; // 设置强制处理标志位
+
+                        // 数据溢出，超出界限数据，丢掉
+                        if (dataNum > 2000000)
+                        {
+                            discard = true;
+                        }
+                    }
+
+                    //  如果设置了强制处理标志位，立即处理所有缓存包
+                    if (ForceProcess23)
+                    {
+                        LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"主动反馈采样数据通道2：循环{_lastLoopSign11}：检测到 ForceProcess = true，立即处理所有缓存数据包。\r\n");
+                        ProcessAllPackets(_buffer23, "主动反馈采样数据通道2", fileName, _lastLoopSign23);
+                        _buffer23.Clear();
+                        ForceProcess23 = false; // 处理完成后自动复位                
+                    }
+
+                    if (!discard)
+                    {
+                        _buffer23.Add(packet); // 将数据包添加到缓冲区
+                    }
+
+                    if (_buffer23.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer23
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer23
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        if (hasDuplicate)
+                        {
+                            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"主动反馈采样数据通道2：存在重复数据包 循环标记：{loopSign}\r\n");
+
+                            var seen = new HashSet<int>();
+                            var filtered = new List<DataPacket>();
+
+                            foreach (var item in _buffer23)
+                            {
+                                if (seen.Add(item.PacketIndex))
+                                {
+                                    filtered.Add(item);
+                                }
+                            }
+
+                            _buffer23 = filtered;
+                        }
+                    }
+
+                    //  正常情况：累积200个包时触发处理
+                    if (_buffer23.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer23
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer23
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        _buffer23 = ProcessPackets(_buffer23, "主动反馈采样数据通道2", fileName, loopSign);
+                        EventReceiveCount?.Invoke($"主动反馈采样数据通道2 循环{loopSign}", 100); // 触发事件，刷新界面日志
+                    }
+                }
+                else if (channelNum == 3)
+                {
+                    bool discard = false;
+
+                    if (loopSign != _lastLoopSign24)
+                    {
+                        // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
+                        _lastLoopSign24 = loopSign;
+
+                        ForceProcess24 = true; // 设置强制处理标志位
+
+                        // 数据溢出，超出界限数据，丢掉
+                        if (dataNum > 2000000)
+                        {
+                            discard = true;
+                        }
+                    }
+
+                    //  如果设置了强制处理标志位，立即处理所有缓存包
+                    if (ForceProcess24)
+                    {
+                        LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"主动反馈采样数据通道3：循环{_lastLoopSign11}：检测到 ForceProcess = true，立即处理所有缓存数据包。\r\n");
+                        ProcessAllPackets(_buffer24, "主动反馈采样数据通道3", fileName, _lastLoopSign24);
+                        _buffer24.Clear();
+                        ForceProcess24 = false; // 处理完成后自动复位                
+                    }
+
+                    if (!discard)
+                    {
+                        _buffer24.Add(packet); // 将数据包添加到缓冲区
+                    }
+
+                    if (_buffer24.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer24
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer24
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        if (hasDuplicate)
+                        {
+                            LogConfig.Intence.WriteLog("RunLog", "DataLog", $"主动反馈采样数据通道3：存在重复数据包 循环标记：{loopSign}\r\n");
+
+                            var seen = new HashSet<int>();
+                            var filtered = new List<DataPacket>();
+
+                            foreach (var item in _buffer24)
+                            {
+                                if (seen.Add(item.PacketIndex))
+                                {
+                                    filtered.Add(item);
+                                }
+                            }
+
+                            _buffer24 = filtered;
+                        }
+                    }
+
+                    //  正常情况：累积200个包时触发处理
+                    if (_buffer24.Count >= 200)
+                    {
+                        // 是否有重复数据包
+                        bool hasDuplicate = _buffer24
+                            .GroupBy(p => p.PacketIndex)
+                            .Any(g => g.Count() > 1);
+
+                        // 找出重复对象
+                        var duplicates = _buffer24
+                            .GroupBy(p => p.PacketIndex)
+                            .Where(g => g.Count() > 1)
+                            .SelectMany(g => g)
+                            .ToList();
+
+                        _buffer24 = ProcessPackets(_buffer24, "主动反馈采样数据通道3", fileName, loopSign);
+                        EventReceiveCount?.Invoke($"主动反馈采样数据通道3 循环{loopSign}", 100); // 触发事件，刷新界面日志
+                    }
+                }
             }
-
-            int len = dataArr.Length;
-            byte[] bytes = new byte[len * 4]; // 每个int 4字节
-
-            Buffer.BlockCopy(dataArr, 0, bytes, 0, bytes.Length);
-
-
-            if (loopSign != _lastLoopSign)
+            catch (Exception ex)
             {
-                // 循环标志发生变化，处理所有缓冲区数据，清空缓冲区，并重置计数为0
-                _dataPacketNum = 0;
-                _dataPacketCount = 0;
-                _lastLoopSign = loopSign;
+                LogConfig.Intence.WriteLog("ErrLog", "DataLog", $"主动反馈采样数据：处理数据包时发生异常：{ex.Message}\r\n {ex.StackTrace}");
+                //throw;
+            }            
 
-                ForceProcess = true; // 设置强制处理标志位
-            }
-
-            DataPacket packet = new DataPacket();
-            packet.PacketIndex = dataNum;
-            packet.DataCount = dataActualLength / 2; // 数据个数（接收到的是每两个字节表示一个数据）
-            packet.Data = bytes;                     // 数据（每四个字节，表示一个int数据）
-            packet.Time = timeReceiveBytes;          // 时间戳
-
-            //  如果设置了强制处理标志位，立即处理所有缓存包
-            if (ForceProcess)
-            {
-                Console.WriteLine("检测到 ForceProcess = true，立即处理所有缓存数据包。");
-                ProcessAllPackets(_buffer2, "主动反馈采样数据", fileName);
-                _buffer2.Clear();
-                ForceProcess = false; // 处理完成后自动复位
-                //return;
-            }
-
-            _buffer2.Add(packet); // 将数据包添加到缓冲区
-
-
-            //  正常情况：累积200个包时触发处理
-            if (_buffer2.Count >= 200)
-            {
-                _buffer2 = ProcessPackets(_buffer2, "主动反馈采样数据", fileName);
-                EventReceiveCount?.Invoke($"主动反馈采样数据 循环{loopSign}", 100); // 触发事件，刷新界面日志
-            }
         }
 
         /// <summary>
@@ -520,11 +1014,12 @@ namespace Slac_DataMQ2CH
         /// <summary>
         /// 正常模式：处理200个数据包
         /// </summary>
-        private List<DataPacket> ProcessPackets(List<DataPacket> buffer, string dataType, string fileName)
+        private List<DataPacket> ProcessPackets(List<DataPacket> buffer111, string dataType, string fileName, int loopSign)
         {
             // 按序号排序
-            buffer = buffer.OrderBy(p => p.PacketIndex).ToList();
+            var buffer = buffer111.OrderBy(p => p.PacketIndex).ToList();
 
+            //buffer.Sort((a, b) => a.PacketIndex.CompareTo(b.PacketIndex));
             //byte[] firstTimeValue = _buffer.First().Time;
 
             // 取前100个包，第一个包的Time，作为数据时间
@@ -540,7 +1035,7 @@ namespace Slac_DataMQ2CH
             // 将毫秒数加回当天日期，得到完整时间
             DateTime time_Plc_Receive = today.AddMilliseconds(msOfDay);
 
-            string timeReceive = time_Plc_Receive.ToString("yyyyMMdd_HHmmss");
+            string timeReceive = time_Plc_Receive.ToString("yyyyMMdd_HHmmss_fff");
             #endregion
 
             // 取前100个包
@@ -562,7 +1057,7 @@ namespace Slac_DataMQ2CH
             }
 
             // 拼接最终文件路径
-            string filePath = Path.Combine(dataDir, $"{timeReceive}_{fileName}.bin");
+            string filePath = Path.Combine(dataDir, $"时间{timeReceive}_{fileName}.bin");
 
             // 最终结果写入文件
             using (FileStream fs = new FileStream
@@ -570,6 +1065,8 @@ namespace Slac_DataMQ2CH
             {
                 fs.Write(resultBytes, 0, resultBytes.Length);
             }
+
+            LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"{dataType} 循环标记：{loopSign} 数据包数量：100\r\n");
 
             // 存储结果
             //ProcessedByteBlocks.Add(resultBytes);
@@ -583,7 +1080,7 @@ namespace Slac_DataMQ2CH
         /// <summary>
         /// 强制模式：直接处理所有包（不管数量是否足够）
         /// </summary>
-        private void ProcessAllPackets(List<DataPacket> buffer, string dataType, string fileName)
+        private void ProcessAllPackets(List<DataPacket> buffer, string dataType, string fileName, int lastLoopSign)
         {
             if (buffer.Count == 0)
                 return;
@@ -604,7 +1101,7 @@ namespace Slac_DataMQ2CH
             // 将毫秒数加回当天日期，得到完整时间
             DateTime time_Plc_Receive = today.AddMilliseconds(msOfDay);
 
-            string timeReceive = time_Plc_Receive.ToString("yyyyMMdd_HHmmss");
+            string timeReceive = time_Plc_Receive.ToString("yyyyMMdd_HHmmss_fff");
             #endregion
 
             // 调用相同的核心处理逻辑
@@ -623,7 +1120,7 @@ namespace Slac_DataMQ2CH
             }
 
             // 拼接最终文件路径
-            string filePath = Path.Combine(dataDir, $"{timeReceive}_{fileName}.bin");
+            string filePath = Path.Combine(dataDir, $"时间{timeReceive}_{fileName}.bin");
 
             // 最终结果写入文件
             using (FileStream fs = new FileStream
@@ -632,7 +1129,8 @@ namespace Slac_DataMQ2CH
                 fs.Write(resultBytes, 0, resultBytes.Length);
             }
 
-            EventReceiveCount?.Invoke($"{dataType} 循环标记{_lastLoopSign}", buffer.Count); // 触发事件，刷新界面日志
+            LogConfig.Intence.WriteLog("RunLog", "ProcessLog", $"{dataType} 循环标记：{lastLoopSign} 数据包数量：{buffer.Count}\r\n");
+            EventReceiveCount?.Invoke($"{dataType} 循环标记{lastLoopSign}", buffer.Count); // 触发事件，刷新界面日志
 
             //ProcessedByteBlocks.Add(resultBytes);
 
@@ -645,7 +1143,6 @@ namespace Slac_DataMQ2CH
         /// </summary>
         private byte[] HandlePacketList(List<DataPacket> packetList, byte[] firstTimeValue)
         {
-
 
             List<DataPacket> processedList = new List<DataPacket>();
 
@@ -663,7 +1160,7 @@ namespace Slac_DataMQ2CH
                 int startB = next.PacketIndex;                       // B包起始序号
 
                 // 检查是否连续
-                if (endA + 1 != startB)
+                if (endA != startB)
                 {
                     int cIndex = endA;
                     int cCount = (startB - 1) - cIndex;
@@ -842,5 +1339,15 @@ namespace Slac_DataMQ2CH
         /// 数据时间
         /// </summary>
         public byte[] Time { get; set; }
+
+        /// <summary>
+        /// 循环标记
+        /// </summary>
+        public int LoopSign { get; set; }
+
+        /// <summary>
+        /// 通道号
+        /// </summary>
+        public int ChannelNum { get; set; }
     }
 }
